@@ -264,6 +264,11 @@ static const int DIALOG_CANCEL	= 129;
 	
 	screenCacheArray = [[NSMutableArray allocWithZone:NULL] init];
 	cacheArray = [[NSMutableArray allocWithZone:NULL] init];
+	aliasPathCache = [[NSMutableDictionary allocWithZone:NULL] init];
+	bookSettingsTempPathIndex = [[NSMutableDictionary allocWithZone:NULL] init];
+	recentItemsTempPathIndex = [[NSMutableDictionary allocWithZone:NULL] init];
+	lastPagesTempPathIndex = [[NSMutableDictionary allocWithZone:NULL] init];
+	sameFolderMenuDirty = YES;
 	imageMutableArray = [[NSMutableArray allocWithZone:NULL] init];
 	bookmarkArray = [[NSMutableArray allocWithZone:NULL] init];
 	currentBookSetting = [[NSMutableDictionary allocWithZone:NULL] init];
@@ -2427,10 +2432,12 @@ static const int DIALOG_CANCEL	= 129;
 {
 	if (currentBookPath == nil) {
 		NSMenu *menu = [[[NSMenu alloc] init] autorelease];
+		[menu setDelegate:(id)self];
 		[openSameFolderMenuItem setSubmenu: menu];
+		sameFolderMenuDirty = NO;
 		return;
 	}
-	NSString *tmpCurrentPath = [self pathFromAliasData:currentBookAlias];
+	NSString *tmpCurrentPath = currentBookPath;
 	NSString *tmpCurrentBookName = [tmpCurrentPath lastPathComponent];
 	NSString *superPath = [tmpCurrentPath stringByDeletingLastPathComponent];
 	
@@ -2443,11 +2450,22 @@ static const int DIALOG_CANCEL	= 129;
 		updateMenu = YES;
 	}
 	if (updateMenu) {
+		if (!force) {
+			NSMenu *menu = [openSameFolderMenuItem submenu];
+			if (!menu) {
+				menu = [[[NSMenu alloc] init] autorelease];
+				[openSameFolderMenuItem setSubmenu:menu];
+			}
+			[menu setDelegate:(id)self];
+			sameFolderMenuDirty = YES;
+			return;
+		}
         NSMutableArray *superDirectoryArray = [NSMutableArray arrayWithArray:[[NSFileManager defaultManager] contentsOfDirectoryAtPath:superPath error:nil]];
 		[superDirectoryArray sortUsingSelector:@selector(finderCompareS:)];
 		
 		NSMenu *menu = [[[NSMenu alloc] init] autorelease];
 		[menu setAutoenablesItems:NO];
+		[menu setDelegate:(id)self];
 		NSEnumerator *enumerator = [superDirectoryArray objectEnumerator];
 		id object;
 		while (object = [enumerator nextObject]) {
@@ -2482,6 +2500,7 @@ static const int DIALOG_CANCEL	= 129;
 		[openSameFolderMenuItem setSubmenu: menu];
 		[lastSameFolderMenuUpdate release];
 		lastSameFolderMenuUpdate = [[NSDate date] retain];
+		sameFolderMenuDirty = NO;
 	} else {
 		if (oldBookPath==nil) {
 			return;

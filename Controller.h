@@ -159,6 +159,11 @@
 	int canScrollMode;
 	
 	NSDate *lastSameFolderMenuUpdate;
+	BOOL sameFolderMenuDirty;
+	NSMutableDictionary *aliasPathCache;
+	NSMutableDictionary *bookSettingsTempPathIndex;
+	NSMutableDictionary *recentItemsTempPathIndex;
+	NSMutableDictionary *lastPagesTempPathIndex;
 	
 }
 - (void)awakeFromNib;
