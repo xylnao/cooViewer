@@ -71,6 +71,7 @@ static const int DIALOG_CANCEL	= 129;
 		
 	[appDefault setObject:[NSNumber numberWithBool:YES] forKey:@"ShowPageBar"];
 	[appDefault setObject:[NSNumber numberWithBool:YES] forKey:@"ShowNumber"];
+	[appDefault setObject:[NSNumber numberWithBool:NO] forKey:@"OpenPageProfileLogEnabled"];
 	
 	[appDefault setObject:[NSNumber numberWithInt:10] forKey:@"OpenRecentLimit"];
 	
@@ -690,6 +691,18 @@ static const int DIALOG_CANCEL	= 129;
 #pragma mark openning
 - (void)openPage:(int)page last:(BOOL)last;
 {	
+	BOOL profileEnabled = [defaults boolForKey:@"OpenPageProfileLogEnabled"];
+	CFAbsoluteTime profileStart = profileEnabled ? CFAbsoluteTimeGetCurrent() : 0.0;
+	CFAbsoluteTime tLoader = 0.0;
+	CFAbsoluteTime tCleanup = 0.0;
+	CFAbsoluteTime tSameFolder = 0.0;
+	CFAbsoluteTime tStateResolve = 0.0;
+	CFAbsoluteTime tRecentMenu = 0.0;
+	CFAbsoluteTime tInitialLoad = 0.0;
+	CFAbsoluteTime tUIFinish = 0.0;
+	NSString *profileTarget = profileEnabled ? [currentBookPath copy] : nil;
+	[self rebuildStateResolveIndexes];
+	
 	[window makeKeyAndOrderFront:self];
 	
 	[progressIndicator startAnimation:self];
@@ -727,7 +740,9 @@ static const int DIALOG_CANCEL	= 129;
 		}
 	}
 	
+	CFAbsoluteTime mark = profileEnabled ? CFAbsoluteTimeGetCurrent() : 0.0;
 	COImageLoader *newImageLoader = [[COImageLoader alloc] initWithPath:currentBookPath readSubFolder:readSubFolder controller:self];
+	if (profileEnabled) tLoader += (CFAbsoluteTimeGetCurrent() - mark);
 
 	//NSLog(@"controller mode=%i count=%i",[newImageLoader mode],[newImageLoader itemCount]);
 	if (!newImageLoader || ![newImageLoader checkPassword] || [newImageLoader mode] < 0 || [newImageLoader itemCount] < 1) {
@@ -752,9 +767,19 @@ static const int DIALOG_CANCEL	= 129;
 			[window performClose:self];
 		}
 		[progressIndicator stopAnimation:self];
+		if (profileEnabled) {
+			CFAbsoluteTime totalFail = CFAbsoluteTimeGetCurrent() - profileStart;
+			NSLog(@"[openPage-profile] target=%@ total=%.3fms loader=%.3fms(%.1f%%) status=failed",
+				  profileTarget ? profileTarget : @"(null)",
+				  totalFail*1000.0,
+				  tLoader*1000.0,
+				  totalFail>0.0 ? (tLoader/totalFail*100.0) : 0.0);
+		}
+		[profileTarget release];
 		//[imageView displayRect:rect];
 		return;
 	} else if ([imageView image]) {
+		if (profileEnabled) mark = CFAbsoluteTimeGetCurrent();
 		/*ウィンドウを開いてたら準備する*/
 		//currentBookPathではなくoldBookPath
 		//currentBookNameではなくoldBookName
@@ -862,8 +887,12 @@ static const int DIALOG_CANCEL	= 129;
 		[bookmarkArray removeAllObjects];
 		[currentBookSetting removeAllObjects];
 		[imageLoader release];
+		if (profileEnabled) tCleanup += (CFAbsoluteTimeGetCurrent() - mark);
 	}
+	
+	if (profileEnabled) mark = CFAbsoluteTimeGetCurrent();
 	[self setSameFolderMenu];
+	if (profileEnabled) tSameFolder += (CFAbsoluteTimeGetCurrent() - mark);
 	if (oldBookPath != nil) {
 		[oldBookPath release];
 		[oldBookName release];
@@ -874,6 +903,7 @@ static const int DIALOG_CANCEL	= 129;
 	}
 	
 	
+	if (profileEnabled) mark = CFAbsoluteTimeGetCurrent();
 	id tempCurrentBookSetting = [self searchFromBookSettings:currentBookPath key:nil more:YES];
 	if (tempCurrentBookSetting) {
 		[currentBookSetting setDictionary:tempCurrentBookSetting];
@@ -939,12 +969,16 @@ static const int DIALOG_CANCEL	= 129;
 	} else {
 		[defaults removeObjectForKey:@"RecentItems"];
 	}
+	if (profileEnabled) tStateResolve += (CFAbsoluteTimeGetCurrent() - mark);
+	if (profileEnabled) mark = CFAbsoluteTimeGetCurrent();
 	[self setOpenRecentMenu];
 	NSMenu *menu=[openRecentMenuItem submenu];
 	[[menu itemAtIndex:0] setState:NSOnState];
 	[[menu itemAtIndex:0] setEnabled:NO];
 	
-	[defaults synchronize];
+	[NSObject cancelPreviousPerformRequestsWithTarget:defaults selector:@selector(synchronize) object:nil];
+	[defaults performSelector:@selector(synchronize) withObject:nil afterDelay:0.5];
+	if (profileEnabled) tRecentMenu += (CFAbsoluteTimeGetCurrent() - mark);
 	
 	
 	
@@ -963,6 +997,7 @@ static const int DIALOG_CANCEL	= 129;
 	
 
 	
+	if (profileEnabled) mark = CFAbsoluteTimeGetCurrent();
 	if (fromFileName) {
 		page = (int)[completeMutableArray indexOfObject:fromFileName];
 		[fromFileName release];
@@ -997,6 +1032,7 @@ static const int DIALOG_CANCEL	= 129;
 			}
 		}
 	}
+	if (profileEnabled) tInitialLoad += (CFAbsoluteTimeGetCurrent() - mark);
 	readMode = (int)[defaults integerForKey:@"ReadMode"];
 	[marksArray removeAllObjects];
 	
@@ -1029,6 +1065,7 @@ static const int DIALOG_CANCEL	= 129;
 	[thumController setmaxCacheCount:(int)[defaults integerForKey:@"ThumbnailCache"]];
 	
 	
+	if (profileEnabled) mark = CFAbsoluteTimeGetCurrent();
 	[progressIndicator stopAnimation:self];
 	//[imageView displayRect:rect];
 	[window updateTrackingRect];
@@ -1044,6 +1081,26 @@ static const int DIALOG_CANCEL	= 129;
 			[thumController showThumbnail:nowPage];
 		}
 	}
+	if (profileEnabled) tUIFinish += (CFAbsoluteTimeGetCurrent() - mark);
+	
+	if (profileEnabled) {
+		CFAbsoluteTime total = CFAbsoluteTimeGetCurrent() - profileStart;
+		CFAbsoluteTime covered = tLoader+tCleanup+tSameFolder+tStateResolve+tRecentMenu+tInitialLoad+tUIFinish;
+		CFAbsoluteTime tOther = total - covered;
+		if (tOther < 0.0) tOther = 0.0;
+		NSLog(@"[openPage-profile] target=%@ total=%.3fms loader=%.3fms(%.1f%%) cleanup=%.3fms(%.1f%%) sameFolder=%.3fms(%.1f%%) stateResolve=%.3fms(%.1f%%) recentMenu=%.3fms(%.1f%%) initialLoad=%.3fms(%.1f%%) uiFinish=%.3fms(%.1f%%) other=%.3fms(%.1f%%)",
+			  profileTarget ? profileTarget : @"(null)",
+			  total*1000.0,
+			  tLoader*1000.0, total>0.0 ? (tLoader/total*100.0) : 0.0,
+			  tCleanup*1000.0, total>0.0 ? (tCleanup/total*100.0) : 0.0,
+			  tSameFolder*1000.0, total>0.0 ? (tSameFolder/total*100.0) : 0.0,
+			  tStateResolve*1000.0, total>0.0 ? (tStateResolve/total*100.0) : 0.0,
+			  tRecentMenu*1000.0, total>0.0 ? (tRecentMenu/total*100.0) : 0.0,
+			  tInitialLoad*1000.0, total>0.0 ? (tInitialLoad/total*100.0) : 0.0,
+			  tUIFinish*1000.0, total>0.0 ? (tUIFinish/total*100.0) : 0.0,
+			  tOther*1000.0, total>0.0 ? (tOther/total*100.0) : 0.0);
+	}
+	[profileTarget release];
 	/*
 	if ([defaults boolForKey:@"ChangeCreator"]) {
 		NSString *tempPath = currentBookPath;
